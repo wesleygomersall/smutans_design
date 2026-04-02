@@ -1,42 +1,52 @@
 #!/usr/bin/env python3
 
-import argparse
+import os
 import glob
 import json
+import datetime
+import argparse
 import pandas as pd
+import numpy as np
 from pymol import cmd, stored 
-import os
+from pyrosetta import * 
+from pyrosetta.rosetta.core.scoring import *
+from pyrosetta.rosetta.protocols.relax import FastRelax
 
-# import re
-# import matplotlib.pyplot as plt
-# from collections import defaultdict
-# from datetime import datetime
+init("-mute all")
+scorefxn = create_score_function("ref2015_cart")
+relax = FastRelax() 
+relax.set_scorefxn(scorefxn)
 
-# TODO get more vip resis
-receptor_vip_resis = {'VAL57', 
-                      'ARG99', 
-                      'THR122', 
-                      'GLY112',
+date_time_string = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") 
 
-                      'MET6', 
+receptor_vip_resis = {'MET6', 
                       'MET54', 
-                      'ILE119',}
+                      'VAL57', 
+                      'ARG99', 
+                      'ARG100', 
+                      'GLY112',
+                      'ILE119',
+                      'THR122', 
+                      }
 
 receptor_hydrophobic_resis = {'MET6',
                               'MET54',
                               'ILE119',}
 
-
-
-receptor_vip_atoms = {}
+receptor_vip_atoms = {894, 802, 791,
+                      941, 961, 935,
+                      425, 446, 444, 
+                      43, 45, 46, 
+                      24, 54, 74, 
+                      75, 
+                      }
 receptor_hydrophobic_atoms = {}
 
-hydrophobic_resis = {'Gly', 'Ala', 'Val', 'Leu', 'Ile', 
-                     'Pro', 'Phe', 'Met', 'Trp'}
+hydrophobic_resis = {'GLY', 'ALA', 'VAL', 'LEU', 'ILE', 
+                     'PRO', 'PHE', 'MET', 'TRP'}
 
-# TODO all combinations to count hydrophobic contacts   
-vip_hydrophobic = {} 
-# this should be all combinations of receptor_hydrophobic_resis + "_" + hydrophobic_resis
+# all combinations to count hydrophobic contacts   
+vip_hydrophobic = {f"{r1}{r2}" for r1 in receptor_hydrophobic_resis for r2 in hydrophobic_resis}
 
 def pymol_find_contacts(model_path: str,
                         cutoff_len: float = 3.5):
@@ -92,12 +102,23 @@ def pymol_get_chainB_sequence(model_path: str):
 
 def main():
     parser = argparse.ArgumentParser(description="")
-    parser.add_argument("--input-dir", "-i", type=str, nargs='+', help="Path to dir containting input pdbs")
+    parser.add_argument("--input-dir", "-i", type=str, help="Path to dir containting input pdbs")
     parser.add_argument("--plddt", "-p", type=str, help="Path to json with plddt data from structure prediction")
     args = parser.parse_args()
 
+    args.input_dir = args.input_dir.rstrip('/') 
+
+    with open(f"{args.input_dir}/searchparams_{date_time_string}.txt", 'w') as fout: 
+        fout.write(f"receptor residues: {receptor_vip_resis}\n")
+        fout.write(f"receptor atoms: {receptor_vip_atoms}\n")
+        fout.write(f"receptor hydrophobic residues: {receptor_hydrophobic_resis}\n")
+        fout.write(f"receptor hydrophobic atoms: {receptor_hydrophobic_atoms}\n")
+        fout.write(f"hydrophibic pairs: {vip_hydrophobic}\n") 
+
     ratings = pd.DataFrame(columns=['design_id',
                                     'peptide_sequence', 
+                                    'pre-relax_score',
+                                    'post-relax_score',
                                     'average_plddt',
                                     'average_chB_plddt',
                                     'res_contacts', 
@@ -114,57 +135,64 @@ def main():
                                     (data['average_plddt'], 
                                      data['residue_plddt']))
 
-    '''
-    # TESTING
-    for i, key in enumerate(plddt_lookup):
-        print(key, plddt_lookup[key][0])
-        print(key, plddt_lookup[key][1])
-        print(i)
-    '''
-    
-    relaxed_dir = f'{args.input_dir}/relaxed'
+    relaxed_dir = f"{args.input_dir}/relaxed"
     if not os.path.isdir(relaxed_dir): 
         os.mkdir(relaxed_dir)
 
-    for pdbfilename in glob.glob(f'{args.input_dir}/*.pdb')
-        design_name = pdbfilename.strip('.pdb') # match all 'design_id' from plddt json
+    for pdbfilename in glob.glob(f'{args.input_dir}/*.pdb'):
+        design_name = os.path.splitext(os.path.basename(pdbfilename))[0] # match all 'design_id' from plddt json
+
+        unrelaxed_pose = pose_from_pdb(pdbfilename)
+        unrelaxed_score = scorefxn(unrelaxed_pose) 
 
         # look for relaxed, if not exist use rosetta to create
         relaxed_path = f"{relaxed_dir}/{design_name}_relaxed.pdb"
-        if not os.exists(relaxed_path): 
-            # TODO rosetta relax, save pdb to output path
-            pass
+        if not os.path.exists(relaxed_path): 
+            print(f"relaxing design \"{design_name}\"")
+            relaxed_pose = unrelaxed_pose.clone()
+            relax.apply(relaxed_pose) 
+            relaxed_pose.dump_pdb(relaxed_path)
         else: 
             print(f"relaxed design \"{design_name}\" found at {relaxed_path}")
+            relaxed_pose = pose_from_pdb(relaxed_path)
+
+        relaxed_score = scorefxn(relaxed_pose) 
 
         mean_plddt = plddt_lookup[design_name][0]
         perres_plddt = plddt_lookup[design_name][1]
-        chB_plddt = np.mean(perres_plddt[230:-1]) # TODO verify this is right
+        chB_plddt = np.mean(perres_plddt[-8:]) # TODO verify this is right
 
-        contactsdf, _ = pymol_find_contacts(file, 3.5)
-
-        # create a set of the chain A contact resis and atoms from contactsdf
-        chA_contactresis = set(contactsdf['chainA_resn'] + contactsdf['chainA_resi']) # 3 letter code + number in seq
-        chA_contactatoms = set(contactsdf['chainA_atomID']) 
-        # for hydrophobic pair identification
-        chAchB_contactpairs = set(contactsdf['chainA_resn'] + contactsdf['chainA_resi'] + "_" + contactsdf['chainB_resn']) # 3 letter code + number in seq + _peptideres
+        try: 
+            contactsdf, _ = pymol_find_contacts(relaxed_path, 3.5)
+            # create a set of the chain A contact resis and atoms from contactsdf
+            chA_contactresis = set(contactsdf['chainA_resn'] + contactsdf['chainA_resi']) # 3 letter code + number in seq
+            chA_contactatoms = set(int(contactsdf['chainA_atomID']))
+            # for hydrophobic pair identification
+            chAchB_contactpairs = set(contactsdf['chainA_resn'] + contactsdf['chainA_resi'] + contactsdf['chainB_resn']) # 3 letter code + number in seq + _peptideres
+        except: # leave empty
+            contactsdf = pd.DataFrame()
+            chA_contactresis = set() 
+            chA_contactatoms = set() 
+            chAchB_contactpairs = set()
 
         num_res_contacts_seen = len(chA_contactresis.intersection(receptor_vip_resis))
         num_atom_contacts_seen = len(chA_contactatoms.intersection(receptor_vip_atoms))
         num_hydrophobic_seen = len(chAchB_contactpairs.intersection(vip_hydrophobic))
 
-        ratings = pd.concat([ratings, 
+        ratings = pd.concat([ratings if not ratings.empty else None, 
                              pd.DataFrame([{'design_id': design_name,
-                                            'peptide_sequence': pymol_get_chainB_sequence(pdbfilename),
+                                            'peptide_sequence': pymol_get_chainB_sequence(relaxed_path),
+                                            'pre-relax_score': unrelaxed_score,
+                                            'post-relax_score': relaxed_score,
                                             'average_plddt': mean_plddt,
                                             'average_chB_plddt': chB_plddt,
-                                            'res_contacts': res_contacts_seen, 
-                                            'atom_contacts': atom_contacts_seen,
+                                            'res_contacts': num_res_contacts_seen, 
+                                            'atom_contacts': num_atom_contacts_seen,
                                             'hydrophobic_contacts': num_hydrophobic_seen}])
                             ], 
                             ignore_index=True)
-    
-    ratings.to_csv('ratings.csv')
+
+    ratings.to_csv(f"{args.input_dir}/ratings{date_time_string}.csv")
 
 if __name__ == "__main__":
     main()
