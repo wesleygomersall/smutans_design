@@ -128,12 +128,15 @@ def main():
     # read in json objects from args.plddt
     # store in dict: "design_id": (mean_plddt, residue_plddts) ## sep dicts? 
     plddt_lookup = dict()
-    with open(args.plddt, 'r') as plddt_json: 
-        for line in plddt_json: 
-            data = json.loads(line.strip())
-            plddt_lookup.setdefault(data['design_id'], 
-                                    (data['average_plddt'], 
-                                     data['residue_plddt']))
+    if os.path.exists(args.plddt): 
+        with open(args.plddt, 'r') as plddt_json: 
+            for line in plddt_json: 
+                data = json.loads(line.strip())
+                plddt_lookup.setdefault(data['design_id'], 
+                                        (data['average_plddt'], 
+                                        data['residue_plddt']))
+        noplddt = False
+    else: noplddt = True
 
     relaxed_dir = f"{args.input_dir}/relaxed"
     if not os.path.isdir(relaxed_dir): 
@@ -158,9 +161,12 @@ def main():
 
         relaxed_score = scorefxn(relaxed_pose) 
 
-        mean_plddt = plddt_lookup[design_name][0]
-        perres_plddt = plddt_lookup[design_name][1]
-        chB_plddt = np.mean(perres_plddt[-8:]) # TODO verify this is right
+        if noplddt: 
+            mean_plddt, perres_plddt, chB_plddt = 0, 0, 0
+        else:
+            mean_plddt = plddt_lookup[design_name][0]
+            perres_plddt = plddt_lookup[design_name][1]
+            chB_plddt = np.mean(perres_plddt[-8:])
 
         try: 
             contactsdf, _ = pymol_find_contacts(relaxed_path, 3.5)
