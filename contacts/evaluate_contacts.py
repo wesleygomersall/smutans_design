@@ -104,6 +104,7 @@ def main():
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--input-dir", "-i", type=str, help="Path to dir containting input pdbs")
     parser.add_argument("--plddt", "-p", type=str, help="Path to json with plddt data from structure prediction")
+    parser.add_argument("--no-relax", "-r", action="store_true", default=False, help="Prevent rosetta relaxing structures")
     args = parser.parse_args()
 
     args.input_dir = args.input_dir.rstrip('/') 
@@ -138,9 +139,10 @@ def main():
         noplddt = False
     else: noplddt = True
 
-    relaxed_dir = f"{args.input_dir}/relaxed"
-    if not os.path.isdir(relaxed_dir): 
-        os.mkdir(relaxed_dir)
+    if not args.no_relax:
+        relaxed_dir = f"{args.input_dir}/relaxed"
+        if not os.path.isdir(relaxed_dir): 
+            os.mkdir(relaxed_dir)
 
     for pdbfilename in glob.glob(f'{args.input_dir}/*.pdb'):
         design_name = os.path.splitext(os.path.basename(pdbfilename))[0] # match all 'design_id' from plddt json
@@ -148,18 +150,22 @@ def main():
         unrelaxed_pose = pose_from_pdb(pdbfilename)
         unrelaxed_score = scorefxn(unrelaxed_pose) 
 
-        # look for relaxed, if not exist use rosetta to create
-        relaxed_path = f"{relaxed_dir}/{design_name}_relaxed.pdb"
-        if not os.path.exists(relaxed_path): 
-            print(f"relaxing design \"{design_name}\"")
-            relaxed_pose = unrelaxed_pose.clone()
-            relax.apply(relaxed_pose) 
-            relaxed_pose.dump_pdb(relaxed_path)
+        if args.no_relax: 
+            relaxed_score = 0
+            analysis_pdb = pdbfilename
         else: 
-            print(f"relaxed design \"{design_name}\" found at {relaxed_path}")
-            relaxed_pose = pose_from_pdb(relaxed_path)
+            # Analyze the relaxed structure, check if exists before creating
+            analysis_pdb = f"{relaxed_dir}/{design_name}_relaxed.pdb"
+            if not os.path.exists(analysis_pdb): 
+                print(f"relaxing design \"{design_name}\"")
+                relaxed_pose = unrelaxed_pose.clone()
+                relax.apply(relaxed_pose) 
+                relaxed_pose.dump_pdb(analysis_pdb)
+            else: 
+                print(f"relaxed design \"{design_name}\" found at {analysis_pdb}")
+                relaxed_pose = pose_from_pdb(analysis_pdb)
 
-        relaxed_score = scorefxn(relaxed_pose) 
+            relaxed_score = scorefxn(relaxed_pose) 
 
         if noplddt: 
             mean_plddt, perres_plddt, chB_plddt = 0, 0, 0
@@ -169,7 +175,7 @@ def main():
             chB_plddt = np.mean(perres_plddt[-8:])
 
         try: 
-            contactsdf, _ = pymol_find_contacts(relaxed_path, 3.5)
+            contactsdf, _ = pymol_find_contacts(analysis_pdb, 3.5)
             # create a set of the chain A contact resis and atoms from contactsdf
             chA_contactresis = set(contactsdf['chainA_resn'] + contactsdf['chainA_resi']) # 3 letter code + number in seq
             chA_contactatoms = set(int(contactsdf['chainA_atomID']))
@@ -187,7 +193,7 @@ def main():
 
         ratings = pd.concat([ratings if not ratings.empty else None, 
                              pd.DataFrame([{'design_id': design_name,
-                                            'peptide_sequence': pymol_get_chainB_sequence(relaxed_path),
+                                            'peptide_sequence': pymol_get_chainB_sequence(analysis_pdb),
                                             'pre-relax_score': unrelaxed_score,
                                             'post-relax_score': relaxed_score,
                                             'average_plddt': mean_plddt,
