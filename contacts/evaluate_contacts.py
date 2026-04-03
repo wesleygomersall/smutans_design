@@ -54,19 +54,18 @@ def pymol_find_contacts(model_path: str,
     cmd.load(model_path, "mymodel")
 
     natoms_nresi = [cmd.count_atoms("chain A"),
-                    cmd.count_atoms("not chain A"),
+                    cmd.count_atoms("chain B"),
                     cmd.count_atoms("chain A and name CA"),
                     cmd.count_atoms("not chain A and name CA") ]
 
-    cmd.select("protein_chain", f"chain A and mymodel")
-    cmd.select("peptide_ligand", f"not chain A and mymodel")
+    cmd.select("protein_chain", "chain A and mymodel")
+    cmd.select("peptide_ligand", "not chain A and mymodel")
 
     pair_list = cmd.find_pairs("protein_chain", "peptide_ligand", 
                                 state1=1,
                                 state2=1,
                                 cutoff=cutoff_len,
-                                mode=1,
-                                angle=45)
+                                mode=0)
 
     stored.res1list = []
     stored.res2list = []
@@ -104,12 +103,14 @@ def main():
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--input-dir", "-i", type=str, help="Path to dir containting input pdbs")
     parser.add_argument("--plddt", "-p", type=str, help="Path to json with plddt data from structure prediction")
+    parser.add_argument("--dist", "-d", type=float, default = 3.5, help="Distance cutoff")
     parser.add_argument("--no-relax", "-r", action="store_true", default=False, help="Prevent rosetta relaxing structures")
     args = parser.parse_args()
 
     args.input_dir = args.input_dir.rstrip('/') 
 
     with open(f"{args.input_dir}/searchparams_{date_time_string}.txt", 'w') as fout: 
+        fout.write(f"cutoff distance: {args.dist} Angstrom(s)\n") 
         fout.write(f"receptor residues: {receptor_vip_resis}\n")
         fout.write(f"receptor atoms: {receptor_vip_atoms}\n")
         fout.write(f"receptor hydrophobic residues: {receptor_hydrophobic_resis}\n")
@@ -122,6 +123,7 @@ def main():
                                     'post-relax_score',
                                     'average_plddt',
                                     'average_chB_plddt',
+                                    'total_num_residue_contacts',
                                     'res_contacts', 
                                     'atom_contacts',
                                     'hydrophobic_contacts'])
@@ -175,19 +177,23 @@ def main():
             chB_plddt = np.mean(perres_plddt[-8:])
 
         try: 
-            contactsdf, _ = pymol_find_contacts(analysis_pdb, 3.5)
+            contactsdf, _ = pymol_find_contacts(analysis_pdb, args.dist)
             # create a set of the chain A contact resis and atoms from contactsdf
             chA_contactresis = set(contactsdf['chainA_resn'] + contactsdf['chainA_resi']) # 3 letter code + number in seq
-            chA_contactatoms = set(int(contactsdf['chainA_atomID']))
+            chA_contactatoms = set(contactsdf['chainA_atomID'].astype(int))
             # for hydrophobic pair identification
             chAchB_contactpairs = set(contactsdf['chainA_resn'] + contactsdf['chainA_resi'] + contactsdf['chainB_resn']) # 3 letter code + number in seq + _peptideres
+
+            print(f"successfully found contacts for {analysis_pdb}")
         except: # leave empty
+            print(f"exception for {analysis_pdb}")
             contactsdf = pd.DataFrame()
             chA_contactresis = set() 
             chA_contactatoms = set() 
             chAchB_contactpairs = set()
 
-        num_res_contacts_seen = len(chA_contactresis.intersection(receptor_vip_resis))
+        total_res_contacts_seen = len(chA_contactresis)
+        num_vip_res_contacts_seen = len(chA_contactresis.intersection(receptor_vip_resis))
         num_atom_contacts_seen = len(chA_contactatoms.intersection(receptor_vip_atoms))
         num_hydrophobic_seen = len(chAchB_contactpairs.intersection(vip_hydrophobic))
 
@@ -198,7 +204,8 @@ def main():
                                             'post-relax_score': relaxed_score,
                                             'average_plddt': mean_plddt,
                                             'average_chB_plddt': chB_plddt,
-                                            'res_contacts': num_res_contacts_seen, 
+                                            'total_num_residue_contacts': total_res_contacts_seen
+                                            'res_contacts': num_vip_res_contacts_seen, 
                                             'atom_contacts': num_atom_contacts_seen,
                                             'hydrophobic_contacts': num_hydrophobic_seen}])
                             ], 
