@@ -204,7 +204,7 @@ def main():
                                             'post-relax_score': relaxed_score,
                                             'average_plddt': mean_plddt,
                                             'average_chB_plddt': chB_plddt,
-                                            'total_num_residue_contacts': total_res_contacts_seen
+                                            'total_num_residue_contacts': total_res_contacts_seen,
                                             'res_contacts': num_vip_res_contacts_seen, 
                                             'atom_contacts': num_atom_contacts_seen,
                                             'hydrophobic_contacts': num_hydrophobic_seen}])
