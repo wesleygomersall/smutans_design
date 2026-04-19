@@ -2,6 +2,7 @@
 
 import json
 import numpy as np
+import pandas as pd
 import glob
 import math
 import os
@@ -11,10 +12,13 @@ from get_contacts import *
 
 import multiprocessing 
 
-from pyrosetta import init, pose_from_pdb, create_score_function, FastRelax
+from pyrosetta import init
+from pyrosetta.io import pose_from_pdb 
+from pyrosetta.rosetta.core.scoring import ScoreFunctionFactory
+from pyrosetta.rosetta.protocols.relax import FastRelax
 
-init()
-scorefxn = create_score_function("ref2015_cart")
+init("-mute all")
+scorefxn = ScoreFunctionFactory.create_score_function("ref2015_cart")
 relax = FastRelax() 
 relax.set_scorefxn(scorefxn)
 
@@ -46,7 +50,7 @@ def relax_and_score_structure(pdb_filename, relaxed_dir):
     unrelaxed_pose = pose_from_pdb(pdb_filename)
     score_before_relax = scorefxn(unrelaxed_pose) 
 
-    relaxed_file_name = f"{relaxed_dir}/{pdb_filename.rstrip('.pdb')}_relaxed.pdb"
+    relaxed_file_name = f"{relaxed_dir}/{os.path.basename(pdb_filename).rstrip('.pdb')}_relaxed.pdb"
 
     if not os.path.exists(relaxed_file_name): 
         relaxed_pose = unrelaxed_pose.clone()
@@ -113,17 +117,6 @@ if __name__ == "__main__":
         fout.write(f"receptor hydrophobic atoms: {receptor_hydrophobic_atoms}\n")
         fout.write(f"hydrophibic pairs: {vip_hydrophobic}\n") 
 
-    ratings = pd.DataFrame(columns=['design_id',
-                                    'peptide_sequence', 
-                                    'pre-relax_score',
-                                    'post-relax_score',
-                                    'average_plddt',
-                                    'average_chB_plddt',
-                                    'total_num_residue_contacts',
-                                    'res_contacts', 
-                                    'atom_contacts',
-                                    'hydrophobic_contacts'])
-
     pldtt_dict = dict()
     if os.path.exists(args.plddt): 
         plddt_dict = get_plddts_json(args.plddt)
@@ -162,9 +155,8 @@ if __name__ == "__main__":
         # multiprocess: count contacts and filter by cutoff distance for all files in analysis_pdbs
         count_results = pool.starmap(count_contacts, 
                                      zip(analysis_pdbs, 
-                                         [args.cutoff for _ in analysis_pdbs]),
+                                         [args.dist for _ in analysis_pdbs]),
                                      chunksize=chunksize)
-        pass
 
     ratingsdf = pd.DataFrame(columns=['design_id', 
                                       'peptide_sequence', 
