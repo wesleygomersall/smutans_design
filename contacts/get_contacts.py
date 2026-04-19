@@ -6,18 +6,6 @@ import datetime
 import pandas as pd
 from pymol import cmd, stored 
 
-# import os
-# import glob
-# import json
-# import argparse
-# import multiprocessing
-# import numpy as np
-# import math
-# from pyrosetta import * 
-# from pyrosetta.rosetta.core.scoring import *
-# from pyrosetta.rosetta.protocols.relax import FastRelax
-# init("-mute all")
-
 date_time_string = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") 
 
 def collect_atom_pairs_AB(pdbfile):
