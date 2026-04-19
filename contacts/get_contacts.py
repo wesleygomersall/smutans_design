@@ -15,6 +15,8 @@ def collect_atom_pairs_AB(pdbfile):
     
     with open(pdbfile, 'r') as fin: 
         for line in fin: 
+            if line == '\n':
+                continue
             if line.split()[0] == 'ATOM' and line.split()[4] == 'A': # in chain
                 A_list.append(('mymodel', line.split()[1]))
             if line.split()[0] == 'ATOM' and line.split()[4] == 'B': 
